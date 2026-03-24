@@ -1,0 +1,43 @@
+{
+  "Name": "OrthancDev",
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "StorageCompression": false,
+  "MaximumStorageSize": 0,
+  "MaximumPatientCount": 0,
+
+  "DicomAet": "ORTHANC",
+  "DicomPort": 4242,
+  "HttpPort": 8042,
+
+  "RemoteAccessAllowed": true,
+  "SslEnabled": false,
+
+  "AuthenticationEnabled": true,
+  "RegisteredUsers": {
+    "admin": "admin"
+  },
+
+  "DicomModalities": {},
+  "OrthancPeers": {},
+
+  "HttpCompressionEnabled": true,
+  "KeepAlive": true,
+
+  "Verbose": false,
+  "Trace": false,
+  "LogExportedResources": false,
+
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/",
+    "EnableWado": true,
+    "WadoRoot": "/wado",
+    "Ssl": false,
+    "QidoCaseSensitive": false
+  },
+
+  "Plugins": [
+    "/usr/share/orthanc/plugins"
+  ]
+}
