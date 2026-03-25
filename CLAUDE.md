@@ -28,7 +28,7 @@ A hospital/clinic PACS (Picture Archiving and Communication System) for Indonesi
 
 ### Local Development
 ```bash
-cd Orthanc
+# From project root
 docker compose up -d
 
 # Check services are running
@@ -102,6 +102,9 @@ docker compose exec postgres psql -U orthanc -d orthanc \
 ```
 PACS/
 ├── CLAUDE.md                  # This file
+├── docker-compose.yml         # Service orchestration
+├── .env                       # Secrets (DB_PASSWORD, ADMIN_PASSWORD, JWT_SECRET_KEY)
+├── .env.example               # Environment variable template
 ├── docs/                      # Detailed project documentation
 │   ├── 00-overview.md         # Architecture overview
 │   ├── 01-local-setup.md      # Local dev setup
@@ -113,11 +116,22 @@ PACS/
 │   ├── 07-auth-security.md    # Security layers
 │   ├── 08-production-deployment.md  # Production deployment
 │   ├── 09-pmk-compliance.md   # Indonesian regulatory compliance
-│   └── 10-testing-checklist.md # Pre-go-live verification
-└── Orthanc/
-    ├── docker-compose.yml     # Service orchestration
+│   ├── 10-testing-checklist.md # Pre-go-live verification
+│   ├── jwt-authorization-guide.md # JWT auth guide
+│   ├── api-documentation.md   # Complete API reference
+│   └── postman-collection.json # Postman collection for API testing
+├── auth-service/              # JWT authentication service
+│   ├── src/                   # TypeScript source
+│   ├── Dockerfile             # Container build
+│   ├── package.json           # Dependencies
+│   ├── setup.sh               # Setup script
+│   ├── test.sh                # Test script
+│   └── README.md              # Auth service docs
+└── orthanc/
     ├── orthanc.json           # Orthanc static config (mounted read-only)
-    ├── .env                   # Secrets (DB_PASSWORD, ADMIN_PASSWORD) - never commit
+    ├── nginx/                 # nginx configuration
+    │   ├── nginx.conf         # Reverse proxy config
+    │   └── certs/             # TLS certificates
     ├── test.dcm               # Sample DICOM file for testing
     └── preview.png            # Sample rendered image
 ```
@@ -127,7 +141,10 @@ PACS/
 ## Key Configuration Files
 
 ### docker-compose.yml
-- Orthanc service on ports 4242 (DICOM) and 8042 (REST API)
+Located at project root for unified service orchestration.
+- Orthanc service on ports 4242 (DICOM) and 8042 (REST API, internal only)
+- Auth service on port 8000 (JWT validation)
+- nginx service on ports 80/443 (reverse proxy with TLS)
 - PostgreSQL service with healthcheck
 - Environment variables override orthanc.json settings
 - Volumes: orthanc-storage (DICOM files), postgres-data (index)
@@ -140,8 +157,10 @@ PACS/
 - `DicomWeb`: QIDO-RS, WADO-RS, STOW-RS endpoints for Next.js integration
 
 ### .env
+Located at project root.
 - `DB_PASSWORD`: PostgreSQL password (use strong random value in production)
 - `ADMIN_PASSWORD`: Orthanc admin password (use strong random value in production)
+- `JWT_SECRET_KEY`: Secret key for JWT token signing (generate with `openssl rand -hex 32`)
 
 ---
 

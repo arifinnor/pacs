@@ -1,4 +1,28 @@
 services:
+  auth-service:
+    build: ./auth-service
+    container_name: pacs-auth-service
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://orthanc:${DB_PASSWORD}@postgres:5432/orthanc
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CORS_ORIGINS=http://localhost:3000,https://localhost
+      - PORT=8000
+      - HOST=0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - pacs-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   nginx:
     image: nginx:alpine
     container_name: nginx
@@ -6,8 +30,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./orthanc/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./orthanc/nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - orthanc
     restart: unless-stopped
@@ -21,7 +45,7 @@ services:
       - "4242:4242"   # DICOM protocol (exposed for modalities)
       # Port 8042 is now internal only - accessed through nginx
     volumes:
-      - ./orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ./orthanc/orthanc.json:/etc/orthanc/orthanc.json:ro
       - orthanc-storage:/var/lib/orthanc/db
     environment:
       - ORTHANC__DICOM_AET=ORTHANC
@@ -49,8 +73,18 @@ services:
       - ORTHANC__POSTGRESQL__ENABLE_INDEX=true
       - ORTHANC__POSTGRESQL__ENABLE_STORAGE=false
       - ORTHANC__POSTGRESQL__INDEX_CONNECTIONS_COUNT=10
+
+      # --- Authorization (JWT) ---
+      - ORTHANC__AUTHORIZATION__ENABLE=true
+      - ORTHANC__AUTHORIZATION__WEB_SERVICE_TOKEN_VALIDATION_URL=http://auth-service:8000/auth/validate
+      - ORTHANC__AUTHORIZATION__TOKEN_HTTP_HEADERS=Authorization
+      - ORTHANC__AUTHORIZATION__CHECKED_LEVEL=studies
+      - ORTHANC__AUTHORIZATION__UNCHECKED_RESOURCES=/system,/auth/*,/app/*,/ui/*
+      - ORTHANC__AUTHORIZATION__UNCHECKED_FOLDERS=/app/,/ui/
     depends_on:
       postgres:
+        condition: service_healthy
+      auth-service:
         condition: service_healthy
     restart: unless-stopped
     networks:

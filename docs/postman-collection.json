@@ -1,0 +1,480 @@
+{
+  "info": {
+    "name": "PACS API",
+    "description": "Complete API collection for PACS system including JWT authentication and Orthanc REST endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8042",
+      "type": "string"
+    },
+    {
+      "key": "authUrl",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication Service",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{authUrl}}/",
+              "host": ["{{authUrl}}"],
+              "path": [""]
+            },
+            "description": "Check if the auth service is running"
+          }
+        },
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser\",\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"viewer\"\n}"
+            },
+            "url": {
+              "raw": "{{authUrl}}/auth/register",
+              "host": ["{{authUrl}}"],
+              "path": ["auth", "register"]
+            },
+            "description": "Register a new user account"
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"testuser\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{authUrl}}/auth/login",
+              "host": ["{{authUrl}}"],
+              "path": ["auth", "login"]
+            },
+            "description": "Authenticate and receive JWT tokens"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "pm.collectionVariables.set(\"accessToken\", jsonData.access_token);",
+                  "pm.collectionVariables.set(\"refreshToken\", jsonData.refresh_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{authUrl}}/auth/refresh",
+              "host": ["{{authUrl}}"],
+              "path": ["auth", "refresh"]
+            },
+            "description": "Get a new access token using a refresh token"
+          }
+        },
+        {
+          "name": "Validate Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{authUrl}}/auth/validate",
+              "host": ["{{authUrl}}"],
+              "path": ["auth", "validate"]
+            },
+            "description": "Validate a JWT token (called by Orthanc)"
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{authUrl}}/auth/me",
+              "host": ["{{authUrl}}"],
+              "path": ["auth", "me"]
+            },
+            "description": "Get information about the authenticated user"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
+            },
+            "url": {
+              "raw": "{{authUrl}}/auth/logout",
+              "host": ["{{authUrl}}"],
+              "path": ["auth", "logout"]
+            },
+            "description": "Revoke a refresh token (logout)"
+          }
+        }
+      ],
+      "description": "JWT-based authentication endpoints"
+    },
+    {
+      "name": "Orthanc REST API",
+      "item": [
+        {
+          "name": "System Information",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/system",
+              "host": ["{{baseUrl}}"],
+              "path": ["system"]
+            },
+            "description": "Get Orthanc system information"
+          }
+        },
+        {
+          "name": "Get Statistics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/statistics",
+              "host": ["{{baseUrl}}"],
+              "path": ["statistics"]
+            },
+            "description": "Get system statistics"
+          }
+        },
+        {
+          "name": "List Plugins",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/plugins",
+              "host": ["{{baseUrl}}"],
+              "path": ["plugins"]
+            },
+            "description": "Get loaded plugins"
+          }
+        },
+        {
+          "name": "List All Patients",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/patients",
+              "host": ["{{baseUrl}}"],
+              "path": ["patients"]
+            },
+            "description": "List all patients"
+          }
+        },
+        {
+          "name": "List All Studies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/studies",
+              "host": ["{{baseUrl}}"],
+              "path": ["studies"]
+            },
+            "description": "List all studies"
+          }
+        },
+        {
+          "name": "Upload DICOM Instance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/dicom"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/instances",
+              "host": ["{{baseUrl}}"],
+              "path": ["instances"]
+            },
+            "description": "Upload a DICOM file"
+          }
+        }
+      ],
+      "description": "Orthanc DICOM server REST API"
+    },
+    {
+      "name": "DICOMweb API",
+      "item": [
+        {
+          "name": "Search for Studies (QIDO-RS)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dicom-web/studies?PatientName=DOE*",
+              "host": ["{{baseUrl}}"],
+              "path": ["dicom-web", "studies"],
+              "query": [
+                {
+                  "key": "PatientName",
+                  "value": "DOE*",
+                  "description": "Filter by patient name (supports wildcards)"
+                }
+              ]
+            },
+            "description": "Search for studies using QIDO-RS"
+          }
+        },
+        {
+          "name": "Get Study Metadata",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dicom-web/studies/:studyUID/metadata",
+              "host": ["{{baseUrl}}"],
+              "path": ["dicom-web", "studies", ":studyUID", "metadata"],
+              "variable": [
+                {
+                  "key": "studyUID",
+                  "value": "",
+                  "description": "Study UID"
+                }
+              ]
+            },
+            "description": "Retrieve study metadata using WADO-RS"
+          }
+        },
+        {
+          "name": "Get Series in Study",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dicom-web/studies/:studyUID/series",
+              "host": ["{{baseUrl}}"],
+              "path": ["dicom-web", "studies", ":studyUID", "series"],
+              "variable": [
+                {
+                  "key": "studyUID",
+                  "value": "",
+                  "description": "Study UID"
+                }
+              ]
+            },
+            "description": "Get all series in a study"
+          }
+        },
+        {
+          "name": "Retrieve Instance DICOM (WADO-RS)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dicom-web/studies/:studyUID/series/:seriesUID/instances/:instanceUID",
+              "host": ["{{baseUrl}}"],
+              "path": ["dicom-web", "studies", ":studyUID", "series", ":seriesUID", "instances", ":instanceUID"],
+              "variable": [
+                {
+                  "key": "studyUID",
+                  "value": ""
+                },
+                {
+                  "key": "seriesUID",
+                  "value": ""
+                },
+                {
+                  "key": "instanceUID",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Retrieve a DICOM instance"
+          }
+        },
+        {
+          "name": "Render Frame (WADO-RS)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/dicom-web/studies/:studyUID/series/:seriesUID/instances/:instanceUID/frames/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["dicom-web", "studies", ":studyUID", "series", ":seriesUID", "instances", ":instanceUID", "frames", "1"],
+              "variable": [
+                {
+                  "key": "studyUID",
+                  "value": ""
+                },
+                {
+                  "key": "seriesUID",
+                  "value": ""
+                },
+                {
+                  "key": "instanceUID",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Render a specific frame as an image"
+          }
+        },
+        {
+          "name": "Store DICOM Instance (STOW-RS)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/dicom"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {}
+            },
+            "url": {
+              "raw": "{{baseUrl}}/dicom-web/studies",
+              "host": ["{{baseUrl}}"],
+              "path": ["dicom-web", "studies"]
+            },
+            "description": "Store a DICOM instance using STOW-RS"
+          }
+        }
+      ],
+      "description": "DICOMweb standard endpoints (QIDO-RS, WADO-RS, STOW-RS)"
+    }
+  ]
+}
