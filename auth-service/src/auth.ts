@@ -1,5 +1,5 @@
 import bcrypt from 'bcrypt';
-import { sign, verify } from '@fastify/jwt';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import type { JwtPayload } from './db/index.js';
 import config from './config.js';
 
@@ -12,16 +12,16 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export function createAccessToken(payload: Omit<JwtPayload, 'type'>): string {
-  return sign({ ...payload, type: 'access' }, { expiresIn: config.accessTokenExpiresIn });
+  return jwt.sign({ ...payload, type: 'access' }, config.jwtSecret, { expiresIn: 15 * 60 });
 }
 
 export function createRefreshToken(payload: Omit<JwtPayload, 'type'>): string {
-  return sign({ ...payload, type: 'refresh' }, { expiresIn: `${config.refreshTokenExpiresDays}d` });
+  return jwt.sign({ ...payload, type: 'refresh' }, config.jwtSecret, { expiresIn: config.refreshTokenExpiresDays * 24 * 60 * 60 });
 }
 
 export function decodeToken(token: string): JwtPayload | null {
   try {
-    return verify(token) as JwtPayload;
+    return jwt.verify(token, config.jwtSecret) as JwtPayload;
   } catch {
     return null;
   }

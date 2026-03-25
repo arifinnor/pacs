@@ -41,10 +41,8 @@ Thumbs.db
 tmp/
 temp/
 
-# Certificates (production - keep dev for now)
-# *.pem
-# *.key
-# *.crt
+# TLS certificates (generate locally, never commit)
+orthanc/nginx/certs/
 
 # Node.js (for future Next.js app)
 node_modules/

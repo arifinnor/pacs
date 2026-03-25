@@ -1,6 +1,6 @@
 import pool from './index.js';
 
-async function migrate() {
+export async function migrate() {
   const client = await pool.connect();
 
   try {
@@ -39,16 +39,20 @@ async function migrate() {
     await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);');
 
     await client.query('COMMIT');
-    console.log('✅ Migration completed successfully');
+    console.log('Migration completed successfully');
   } catch (e) {
     await client.query('ROLLBACK');
-    console.error('❌ Migration failed', e);
+    console.error('Migration failed', e);
     throw e;
   } finally {
     client.release();
   }
 }
 
-migrate()
-  .then(() => process.exit(0))
-  .catch(() => process.exit(1));
+// Run directly if called as script
+const isMain = process.argv[1]?.endsWith('migrate.js') || process.argv[1]?.endsWith('migrate.ts');
+if (isMain) {
+  migrate()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
+}

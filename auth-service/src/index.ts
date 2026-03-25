@@ -1,9 +1,18 @@
-import Fastify from 'fastify';
+import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
-import jwt from '@fastify/jwt';
 import cookie from '@fastify/cookie';
 import config from './config.js';
 import { authRoutes } from './routes/auth.js';
+import { decodeToken } from './auth.js';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+  }
+  interface FastifyRequest {
+    user?: { sub: string; username: string; role: string; type: string };
+  }
+}
 
 async function build() {
   const fastify = Fastify({
@@ -14,10 +23,6 @@ async function build() {
   await fastify.register(cors, {
     origin: config.corsOrigins,
     credentials: true,
-  });
-
-  await fastify.register(jwt, {
-    secret: config.jwtSecret,
   });
 
   await fastify.register(cookie, {
@@ -33,10 +38,10 @@ async function build() {
         return reply.code(401).send({ error: 'No token provided' });
       }
 
-      const payload = fastify.jwt.verify(token) as any;
+      const payload = decodeToken(token);
 
-      if (payload.type !== 'access') {
-        return reply.code(401).send({ error: 'Invalid token type' });
+      if (!payload || payload.type !== 'access') {
+        return reply.code(401).send({ error: 'Invalid token' });
       }
 
       request.user = payload;
@@ -59,9 +64,23 @@ async function build() {
 const start = async () => {
   const app = await build();
 
+  const shutdown = async (signal: string) => {
+    app.log.info(`${signal} received, shutting down gracefully`);
+    await app.close();
+    const pool = (await import('./db/index.js')).default;
+    await pool.end();
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   try {
+    const { migrate } = await import('./db/migrate.js');
+    await migrate();
+
     await app.listen({ port: config.port, host: config.host });
-    console.log(`🚀 Auth service listening on ${config.host}:${config.port}`);
+    console.log(`Auth service listening on ${config.host}:${config.port}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

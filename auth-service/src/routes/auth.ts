@@ -1,21 +1,46 @@
 import { FastifyInstance } from 'fastify';
-import { v4 as uuidv4 } from 'uuid';
 import { addDays } from 'date-fns/addDays';
 import { query } from '../db/index.js';
 import { hashPassword, verifyPassword, createAccessToken, createRefreshToken, decodeToken } from '../auth.js';
 
+interface RegisterBody { username: string; email: string; password: string; role?: string; }
+interface LoginBody { username: string; password: string; }
+interface TokenBody { refresh_token: string; }
+
 export async function authRoutes(fastify: FastifyInstance) {
   // Register
-  fastify.post('/register', async (request, reply) => {
-    const { username, email, password, role = 'viewer' } = request.body as any;
+  fastify.post<{ Body: RegisterBody }>('/register', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['username', 'email', 'password'],
+        properties: {
+          username: { type: 'string', minLength: 1 },
+          email: { type: 'string', format: 'email' },
+          password: { type: 'string', minLength: 8 },
+          role: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { username, email, password, role } = request.body;
 
-    // Validate input
-    if (!username || !email || !password) {
-      return reply.code(400).send({ error: 'Username, email, and password are required' });
-    }
-
-    if (password.length < 8) {
-      return reply.code(400).send({ error: 'Password must be at least 8 characters' });
+    // Only admins can assign roles other than 'viewer'
+    let assignedRole = 'viewer';
+    if (role && role !== 'viewer') {
+      const token = request.headers.authorization?.replace('Bearer ', '');
+      if (!token) {
+        return reply.code(403).send({ error: 'Only admins can assign elevated roles' });
+      }
+      const callerPayload = decodeToken(token);
+      if (!callerPayload || callerPayload.role !== 'admin') {
+        return reply.code(403).send({ error: 'Only admins can assign elevated roles' });
+      }
+      const validRoles = ['admin', 'radiologist', 'viewer'];
+      if (!validRoles.includes(role)) {
+        return reply.code(400).send({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` });
+      }
+      assignedRole = role;
     }
 
     // Check existing user
@@ -29,30 +54,33 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
 
     // Create user
-    const userId = uuidv4();
     const hashedPassword = await hashPassword(password);
 
-    await query(
-      'INSERT INTO users (id, username, email, hashed_password, role) VALUES ($1, $2, $3, $4, $5)',
-      [userId, username, email, hashedPassword, role]
+    const result = await query(
+      'INSERT INTO users (username, email, hashed_password, role) VALUES ($1, $2, $3, $4) RETURNING id, username, email, role, is_active, created_at',
+      [username, email, hashedPassword, assignedRole]
     );
-
-    const result = await query('SELECT id, username, email, role, is_active, created_at FROM users WHERE id = $1', [userId]);
 
     return reply.code(201).send(result.rows[0]);
   });
 
   // Login
-  fastify.post('/login', async (request, reply) => {
-    const { username, password } = request.body as any;
-
-    // Validate input
-    if (!username || !password) {
-      return reply.code(400).send({ error: 'Username and password are required' });
-    }
+  fastify.post<{ Body: LoginBody }>('/login', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['username', 'password'],
+        properties: {
+          username: { type: 'string', minLength: 1 },
+          password: { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { username, password } = request.body;
 
     // Find user
-    const result = await query('SELECT * FROM users WHERE username = $1', [username]);
+    const result = await query('SELECT id, username, email, hashed_password, role, is_active FROM users WHERE username = $1', [username]);
 
     if (result.rows.length === 0) {
       return reply.code(401).send({ error: 'Invalid credentials' });
@@ -71,8 +99,9 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.code(401).send({ error: 'Invalid credentials' });
     }
 
-    // Update last login
+    // Update last login and clean up expired/revoked tokens for this user
     await query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+    await query('DELETE FROM refresh_tokens WHERE user_id = $1 AND (revoked = true OR expires_at < CURRENT_TIMESTAMP)', [user.id]);
 
     // Create tokens
     const accessToken = createAccessToken({
@@ -88,12 +117,11 @@ export async function authRoutes(fastify: FastifyInstance) {
     });
 
     // Store refresh token
-    const tokenId = uuidv4();
     const expiresAt = addDays(new Date(), 7);
 
     await query(
-      'INSERT INTO refresh_tokens (id, token, user_id, expires_at) VALUES ($1, $2, $3, $4)',
-      [tokenId, refreshToken, user.id, expiresAt]
+      'INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES ($1, $2, $3)',
+      [refreshToken, user.id, expiresAt]
     );
 
     return {
@@ -105,12 +133,18 @@ export async function authRoutes(fastify: FastifyInstance) {
   });
 
   // Refresh token
-  fastify.post('/refresh', async (request, reply) => {
-    const { refresh_token } = request.body as any;
-
-    if (!refresh_token) {
-      return reply.code(400).send({ error: 'Refresh token is required' });
-    }
+  fastify.post<{ Body: TokenBody }>('/refresh', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['refresh_token'],
+        properties: {
+          refresh_token: { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { refresh_token } = request.body;
 
     // Decode and verify
     const payload = decodeToken(refresh_token);
@@ -130,7 +164,7 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
 
     // Get user
-    const userResult = await query('SELECT * FROM users WHERE id = $1', [payload.sub]);
+    const userResult = await query('SELECT id, username, role, is_active FROM users WHERE id = $1', [payload.sub]);
 
     if (userResult.rows.length === 0 || !userResult.rows[0].is_active) {
       return reply.code(401).send({ error: 'User not found or inactive' });
@@ -154,12 +188,11 @@ export async function authRoutes(fastify: FastifyInstance) {
     // Revoke old token, add new one
     await query('UPDATE refresh_tokens SET revoked = true WHERE token = $1', [refresh_token]);
 
-    const newTokenId = uuidv4();
     const expiresAt = addDays(new Date(), 7);
 
     await query(
-      'INSERT INTO refresh_tokens (id, token, user_id, expires_at) VALUES ($1, $2, $3, $4)',
-      [newTokenId, newRefreshToken, user.id, expiresAt]
+      'INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES ($1, $2, $3)',
+      [newRefreshToken, user.id, expiresAt]
     );
 
     return {
@@ -224,12 +257,18 @@ export async function authRoutes(fastify: FastifyInstance) {
   });
 
   // Logout
-  fastify.post('/logout', async (request, reply) => {
-    const { refresh_token } = request.body as any;
-
-    if (!refresh_token) {
-      return reply.code(400).send({ error: 'Refresh token is required' });
-    }
+  fastify.post<{ Body: TokenBody }>('/logout', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['refresh_token'],
+        properties: {
+          refresh_token: { type: 'string', minLength: 1 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { refresh_token } = request.body;
 
     // Revoke refresh token
     await query('UPDATE refresh_tokens SET revoked = true WHERE token = $1', [refresh_token]);

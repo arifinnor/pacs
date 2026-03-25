@@ -32,15 +32,18 @@ export interface JwtPayload {
   type: 'access' | 'refresh';
 }
 
+const SENSITIVE_PATTERNS = /refresh_tokens|hashed_password|token/i;
+
 export async function query(text: string, params?: any[]): Promise<QueryResult> {
   const start = Date.now();
+  const isSensitive = SENSITIVE_PATTERNS.test(text);
   try {
     const res = await pool.query(text, params);
     const duration = Date.now() - start;
-    console.log('Executed query', { text, duration, rows: res.rowCount });
+    console.log('Executed query', { text: isSensitive ? '[REDACTED]' : text, duration, rows: res.rowCount });
     return res;
   } catch (error) {
-    console.error('Database query error', { text, error });
+    console.error('Database query error', { text: isSensitive ? '[REDACTED]' : text, error });
     throw error;
   }
 }
