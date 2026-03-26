@@ -37,14 +37,6 @@
     "QidoCaseSensitive": false
   },
 
-  "Authorization": {
-    "WebServiceTokenValidationUrl": "http://auth-service:8000/auth/validate",
-    "TokenHttpHeaders": ["Authorization"],
-    "CheckedLevel": "studies",
-    "UncheckedResources": ["/system", "/auth/*", "/app/*", "/ui/*"],
-    "UncheckedFolders": ["/app/", "/ui/"]
-  },
-
   "Plugins": [
     "/usr/share/orthanc/plugins"
   ]

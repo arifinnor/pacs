@@ -28,8 +28,16 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    command: >
+      /bin/sh -c "
+        export NGINX_ORTHANC_AUTH=$$(printf 'admin:%s' \"$$ADMIN_PASSWORD\" | base64) &&
+        envsubst '$$NGINX_ORTHANC_AUTH' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf &&
+        nginx -g 'daemon off;'
+      "
     volumes:
-      - ./orthanc/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./orthanc/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
       - ./orthanc/nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - orthanc
@@ -75,8 +83,9 @@ services:
       - ORTHANC__POSTGRESQL__INDEX_CONNECTIONS_COUNT=10
 
       # --- Authorization (JWT) ---
-      # Authorization config is in orthanc.json (env vars can't encode JSON arrays)
-      - ORTHANC__AUTHORIZATION__ENABLE=true
+      # JWT validation is handled by nginx auth_request → auth-service
+      # The Orthanc authorization plugin config is removed from orthanc.json
+      # so the plugin loads but has no validation URL (no-op)
     depends_on:
       postgres:
         condition: service_healthy

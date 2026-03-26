@@ -203,7 +203,41 @@ export async function authRoutes(fastify: FastifyInstance) {
     };
   });
 
-  // Validate (called by Orthanc)
+  // Validate via GET (called by nginx auth_request)
+  // nginx auth_request only cares about HTTP status: 200 = allow, 401 = deny
+  fastify.get('/validate', async (request, reply) => {
+    try {
+      const token = request.headers.authorization?.replace('Bearer ', '');
+
+      if (!token) {
+        return reply.code(401).send({ error: 'No token provided' });
+      }
+
+      const payload = decodeToken(token);
+
+      if (!payload || payload.type !== 'access') {
+        return reply.code(401).send({ error: 'Invalid token' });
+      }
+
+      const result = await query(
+        'SELECT COUNT(*) as count FROM refresh_tokens WHERE user_id = $1 AND revoked = false AND expires_at > CURRENT_TIMESTAMP',
+        [payload.sub]
+      );
+
+      const validTokens = parseInt(result.rows[0].count);
+
+      if (validTokens === 0) {
+        return reply.code(401).send({ error: 'Session revoked' });
+      }
+
+      return reply.code(200).send({ valid: true });
+    } catch (error) {
+      console.error('Validate error', error);
+      return reply.code(401).send({ error: 'Validation failed' });
+    }
+  });
+
+  // Validate via POST (called by Orthanc authorization plugin)
   fastify.post('/validate', async (request, reply) => {
     try {
       const token = request.headers.authorization?.replace('Bearer ', '');

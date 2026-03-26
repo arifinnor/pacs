@@ -2,10 +2,15 @@
 
 Complete API reference for the PACS system including JWT authentication and Orthanc REST endpoints.
 
-**Base URLs:**
-- Auth Service: `http://localhost:8000`
-- Orthanc REST API: `http://localhost:8042` (internal) or `https://localhost/orthanc` (through nginx)
-- DICOMweb: `http://localhost:8042/dicom-web` (internal) or `https://localhost/orthanc/dicom-web` (through nginx)
+**Base URL:** `https://localhost` (all traffic goes through nginx)
+
+| Service | URL |
+|---------|-----|
+| Auth | `https://localhost/auth` |
+| Orthanc REST API | `https://localhost/orthanc` |
+| DICOMweb | `https://localhost/orthanc/dicom-web` or `https://localhost/dicom-web` |
+
+> **Note:** Ports 8042 (Orthanc) and 8000 (auth-service) are internal only — not exposed to the host. All requests must go through nginx with HTTPS.
 
 ---
 
@@ -30,7 +35,7 @@ The authentication service provides JWT-based authentication for the PACS system
 
 ### Base URL
 ```
-http://localhost:8000
+https://localhost/auth
 ```
 
 ### Endpoints
@@ -195,7 +200,30 @@ Content-Type: application/json
 
 #### 5. Validate Token
 
-Validate a JWT token (called by Orthanc Authorization Plugin).
+Validate a JWT token. Two methods are available:
+
+**GET** (used by nginx `auth_request` subrequest):
+
+```http
+GET /auth/validate
+Authorization: Bearer <access_token>
+```
+
+**Response:** `200 OK` — token is valid
+```json
+{
+  "valid": true
+}
+```
+
+**Response:** `401 Unauthorized` — token is invalid
+```json
+{
+  "error": "Invalid token"
+}
+```
+
+**POST** (used by Orthanc Authorization Plugin):
 
 ```http
 POST /auth/validate
@@ -290,23 +318,19 @@ Content-Type: application/json
 
 Orthanc provides a comprehensive REST API for managing DICOM data. All endpoints require authentication (either basic auth or JWT token).
 
-### Base URLs
+### Base URL
 ```
-Internal: http://localhost:8042
-Through nginx: https://localhost/orthanc
+https://localhost/orthanc
 ```
 
 ### Authentication
 
-**Option 1: Basic Auth** (during transition)
-```http
-Authorization: Basic base64(username:password)
-```
-
-**Option 2: JWT Bearer Token** (recommended)
+**JWT Bearer Token** (required):
 ```http
 Authorization: Bearer <access_token>
 ```
+
+> nginx validates the JWT via `auth_request`, then injects basic auth credentials before forwarding to Orthanc. Clients only need to send the JWT Bearer token.
 
 ### System Endpoints
 
@@ -674,15 +698,18 @@ Content-Type: application/dicom
 
 DICOMweb provides RESTful access to DICOM data following the DICOM standard.
 
-### Base URLs
+### Base URL
 ```
-Internal: http://localhost:8042/dicom-web
-Through nginx: https://localhost/orthanc/dicom-web
+https://localhost/orthanc/dicom-web
+```
+Or the shorthand:
+```
+https://localhost/dicom-web
 ```
 
 ### Authentication
 
-Same as Orthanc REST API (Basic Auth or JWT Bearer Token).
+Same as Orthanc REST API (JWT Bearer Token required).
 
 ### QIDO-RS (Query)
 
@@ -931,12 +958,13 @@ Content-Type: application/dicom
 ### nginx Rate Limits
 
 Through nginx reverse proxy:
-- **30 requests/second** with burst capacity of 10
-- Exceeding limit returns `503 Service Unavailable`
 
-### Auth Service
+| Zone | Rate | Burst | Applies to |
+|------|------|-------|------------|
+| `api_limit` | 30 req/s | 10 | `/orthanc/*`, `/dicom-web/*` |
+| `auth_limit` | 5 req/s | 3 | `/auth/*` |
 
-No rate limiting currently (can be added in production).
+Exceeding limits returns `503 Service Unavailable`.
 
 ---
 
@@ -945,18 +973,20 @@ No rate limiting currently (can be added in production).
 ### Complete Workflow Example
 
 ```bash
+# All requests go through nginx (https://localhost)
+# Use -sk to accept self-signed certs in development
+
 # 1. Register a new user
-curl -X POST http://localhost:8000/auth/register \
+curl -sk -X POST https://localhost/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "username": "radiologist1",
     "email": "radio@hospital.com",
-    "password": "secure_password",
-    "role": "radiologist"
+    "password": "secure_password"
   }'
 
 # 2. Login to get tokens
-RESPONSE=$(curl -X POST http://localhost:8000/auth/login \
+RESPONSE=$(curl -sk -X POST https://localhost/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username": "radiologist1", "password": "secure_password"}')
 
@@ -964,27 +994,33 @@ RESPONSE=$(curl -X POST http://localhost:8000/auth/login \
 TOKEN=$(echo $RESPONSE | jq -r '.access_token')
 
 # 3. List all patients using JWT
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8042/patients
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  https://localhost/orthanc/patients
 
 # 4. Get patient details
 PATIENT_ID="550e8400-e29b-41d4-a716-446655440000"
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8042/patients/$PATIENT_ID
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  https://localhost/orthanc/patients/$PATIENT_ID
 
 # 5. Search studies via DICOMweb
-curl -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8042/dicom-web/studies?PatientName=DOE*"
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  "https://localhost/orthanc/dicom-web/studies?PatientName=DOE*"
 
-# 6. Get rendered image
+# 6. Upload a DICOM file
+curl -sk -X POST https://localhost/orthanc/instances \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/dicom" \
+  --data-binary @test.dcm
+
+# 7. Get rendered image
 INSTANCE_ID="990e8400-e29b-41d4-a716-446655440000"
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:8042/instances/$INSTANCE_ID/preview \
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  https://localhost/orthanc/instances/$INSTANCE_ID/preview \
   --output preview.png
 
-# 7. Logout
+# 8. Logout
 REFRESH_TOKEN=$(echo $RESPONSE | jq -r '.refresh_token')
-curl -X POST http://localhost:8000/auth/logout \
+curl -sk -X POST https://localhost/auth/logout \
   -H "Content-Type: application/json" \
   -d "{\"refresh_token\": \"$REFRESH_TOKEN\"}"
 ```
@@ -1006,7 +1042,7 @@ class PACSClient {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
 
-  constructor(baseUrl: string = 'http://localhost:8042', authUrl: string = 'http://localhost:8000') {
+  constructor(baseUrl: string = 'https://localhost/orthanc', authUrl: string = 'https://localhost') {
     this.baseUrl = baseUrl;
     this.authUrl = authUrl;
   }
@@ -1126,8 +1162,8 @@ import requests
 from typing import List, Dict, Any, Optional
 
 class PACSClient:
-    def __init__(self, base_url: str = 'http://localhost:8042',
-                 auth_url: str = 'http://localhost:8000'):
+    def __init__(self, base_url: str = 'https://localhost/orthanc',
+                 auth_url: str = 'https://localhost'):
         self.base_url = base_url
         self.auth_url = auth_url
         self.access_token: Optional[str] = None
@@ -1235,4 +1271,4 @@ client.get_instance_preview('instance-id-here', 'preview.png')
 
 ---
 
-**Last Updated:** 2026-03-24
+**Last Updated:** 2026-03-26

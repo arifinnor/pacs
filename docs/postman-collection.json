@@ -7,12 +7,12 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:8042",
+      "value": "https://localhost/orthanc",
       "type": "string"
     },
     {
       "key": "authUrl",
-      "value": "http://localhost:8000",
+      "value": "https://localhost",
       "type": "string"
     },
     {
