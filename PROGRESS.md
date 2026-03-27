@@ -1,7 +1,7 @@
 # PACS Implementation Progress
 
-**Last Updated:** 2026-03-24
-**Current Phase:** Phase 3 - JWT-Based Authorization
+**Last Updated:** 2026-03-27
+**Current Phase:** Phase 4 - OHIF DICOM Viewer
 **Status:** ✅ Complete
 
 ---
@@ -256,13 +256,13 @@ All tests passed ✅:
 ## Available Plugins (Not Loaded)
 
 ### Relevant for Future Phases
-- **libOrthancAuthorization.so** - JWT-based authorization (Phase 3)
+- **libOrthancAuthorization.so** - Loaded but unused (JWT handled by nginx auth_request)
 - **libConnectivityChecks.so** - Monitor modality connectivity (Optional - production)
 - **libHousekeeper.so** - Periodic maintenance tasks (Optional - production)
 
 ### Not Recommended
-- ❌ **libOrthancOHIF.so** (47 MB) - Will use standalone OHIF instead
-- ❌ **Viewer plugins** - OHIF is better maintained
+- ❌ **libOrthancOHIF.so** (47 MB) - Using standalone OHIF container instead
+- ❌ **Viewer plugins** - Standalone OHIF is better maintained
 - ❌ **MySQL/ODBC plugins** - Already using PostgreSQL
 
 ---
@@ -316,12 +316,12 @@ All tests passed ✅:
 - **Storage:** PostgreSQL allowlist for revocation
 - **Validation:** Orthanc Authorization Plugin integration
 
-#### 4. Orthanc Authorization Plugin
-- **Enabled:** Yes (via environment variables)
+#### 4. nginx JWT Validation (auth_request)
+- **Method:** nginx `auth_request` subrequest to auth-service
 - **Validation URL:** http://auth-service:8000/auth/validate
-- **Token Header:** Authorization
-- **Checked Level:** Studies
-- **Unchecked Resources:** /system, /auth/*, /app/*, /ui/*
+- **On success:** nginx injects basic auth header for Orthanc
+- **Protected routes:** `/orthanc/`, `/dicom-web/`, `/wado`
+- **Unprotected routes:** `/auth/`, `/viewer/`
 
 ### Files Created
 
@@ -366,8 +366,7 @@ docs/
 auth-service:
   build: ./auth-service
   container_name: pacs-auth-service
-  ports:
-    - "8000:8000"
+  # Port 8000 is internal only — accessed through nginx
   environment:
     - DATABASE_URL=postgresql://orthanc:${DB_PASSWORD}@postgres:5432/orthanc
     - JWT_SECRET_KEY=${JWT_SECRET_KEY}
@@ -384,15 +383,10 @@ auth-service:
     retries: 3
 ```
 
-**New Orthanc Environment Variables:**
-```yaml
-- ORTHANC__AUTHORIZATION__ENABLE=true
-- ORTHANC__AUTHORIZATION__WEB_SERVICE_TOKEN_VALIDATION_URL=http://auth-service:8000/auth/validate
-- ORTHANC__AUTHORIZATION__TOKEN_HTTP_HEADERS=Authorization
-- ORTHANC__AUTHORIZATION__CHECKED_LEVEL=studies
-- ORTHANC__AUTHORIZATION__UNCHECKED_RESOURCES=/system,/auth/*,/app/*,/ui/*
-- ORTHANC__AUTHORIZATION__UNCHECKED_FOLDERS=/app/,/ui/
-```
+**JWT Authorization (via nginx auth_request):**
+JWT validation is handled by nginx, not the Orthanc Authorization Plugin.
+nginx validates tokens via `auth_request` subrequest to auth-service,
+then injects basic auth credentials for Orthanc on success.
 
 #### `.env.example` (moved from orthanc/ to root)
 **Changes:**
@@ -424,23 +418,19 @@ JWT_SECRET_KEY=your_super_secret_jwt_key_change_in_production_minimum_32_charact
 
 **After Phase 3:**
 ```
-[User] → Login Request
+[User] → Login Request (POST /auth/login)
     ↓
-[Auth Service :8000]
-    ↓ (verifies credentials)
-[PostgreSQL users table]
-    ↓ (generates JWT + refresh token)
+[nginx :443] → [Auth Service :8000]
+    ↓ (verifies credentials against PostgreSQL)
 [Auth Service] → Access Token (15min) + Refresh Token (7days)
     ↓
 [User] → Request with Bearer token
     ↓
-[nginx :443] → Forwards token
-    ↓
-[Orthanc Authorization Plugin] → Validates token via Auth Service
-    ↓ (POST /auth/validate)
-[Auth Service] → Verifies JWT signature + checks allowlist
-    ↓ {"granted": true}
-[Orthanc] → Processes request (with user context)
+[nginx :443] → auth_request subrequest to Auth Service
+    ↓ (GET /auth/validate with token)
+[Auth Service] → Verifies JWT signature + checks database
+    ↓ (200 OK)
+[nginx] → Injects basic auth header → [Orthanc] → Processes request
 ```
 
 ### Database Schema
@@ -523,14 +513,14 @@ curl -u admin:admin http://localhost:8042/patients
 curl -H "Authorization: Bearer $TOKEN" http://localhost:8042/patients
 ```
 
-### Current Container Stack
+### Container Stack (after Phase 3)
 
 ```
 ┌─────────────────────────────────────┐
 │          nginx:443 (HTTPS)          │
 │  • TLS termination                  │
 │  • Rate limiting (30 req/s)         │
-│  • Security headers                 │
+│  • JWT validation (auth_request)    │
 │  • HTTP→HTTPS redirect              │
 └─────────────────────────────────────┘
          ↓ internal network
@@ -538,7 +528,6 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8042/patients
 │    orthanc-dev:8042 (internal)      │
 │    • DICOM:4242 (exposed)           │
 │    • PostgreSQL index               │
-│    • Authorization Plugin (JWT)     │
 │    • DICOMweb enabled               │
 └─────────────────────────────────────┘
          ↓                    ↓
@@ -546,6 +535,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8042/patients
 │ auth-service:8000│  │ orthanc-postgres:5432│
 │ • JWT validation │  │ • Orthanc data       │
 │ • User storage   │  │ • User management    │
+│ • Internal only  │  │                      │
 └──────────────────┘  └──────────────────────┘
 ```
 
@@ -732,7 +722,84 @@ All tests should pass ✅:
 
 ---
 
-## Next Steps (Phase 4)
+## Phase 4: OHIF DICOM Viewer (Completed)
+
+### Implementation Date
+2026-03-27
+
+### What Was Added
+
+#### 1. OHIF Viewer Service
+- **Image:** `ohif/app:v3.10.2`
+- **Access URL:** `https://localhost/viewer/`
+- **Internal port:** 80 (not exposed — accessed only through nginx)
+- **Config:** `ohif/app-config.js` mounted into container
+
+#### 2. OHIF nginx Integration
+- `/viewer/` → OHIF SPA (no auth, static assets)
+- `/ohif-dicom-web/` → Orthanc DICOMweb (basic auth injected, no JWT)
+- `/ohif-wado` → Orthanc WADO-URI (basic auth injected, no JWT)
+- `/` catch-all → OHIF webpack chunks (built with `PUBLIC_URL=/`)
+
+#### 3. Asset Path Rewriting
+OHIF is built with `PUBLIC_URL=/` but served under `/viewer/`.
+An idempotent `sed` entrypoint rewrites `index.html` asset paths to `/viewer/` at container startup.
+Webpack code-split chunks still load from `/` and are caught by the nginx catch-all.
+
+#### 4. Auth Strategy
+OHIF uses dedicated nginx proxy endpoints (`/ohif-dicom-web/`, `/ohif-wado`) that inject basic auth without requiring JWT. This keeps the viewer SPA stateless — no token management needed in client-side JavaScript.
+
+The JWT-protected endpoints (`/dicom-web/`, `/wado`) remain unchanged for API clients and the planned Next.js frontend.
+
+### Files Created
+
+```
+ohif/
+└── app-config.js          # OHIF runtime config (DICOMweb endpoints)
+```
+
+### Files Modified
+
+- `docker-compose.yml` — Added OHIF service with sed entrypoint
+- `orthanc/nginx/nginx.conf` — Added OHIF upstream, viewer/proxy/catch-all locations
+- `CLAUDE.md` — Updated tech stack, data flow, routing docs
+- `docs/api-documentation.md` — Added WADO-URI and OHIF Viewer sections
+- `docs/postman-collection.json` — Added WADO-URI and OHIF Viewer folders
+
+### Current Container Stack
+
+```
+┌─────────────────────────────────────┐
+│          nginx:443 (HTTPS)          │
+│  • TLS termination                  │
+│  • Rate limiting (30 req/s)         │
+│  • JWT validation (auth_request)    │
+│  • OHIF reverse proxy (/viewer/)    │
+└─────────────────────────────────────┘
+    ↓              ↓              ↓
+┌──────────┐ ┌──────────┐ ┌──────────────────┐
+│ OHIF     │ │ Orthanc  │ │ auth-service     │
+│ :80      │ │ :8042    │ │ :8000            │
+│ (viewer) │ │ (DICOM)  │ │ (JWT validation) │
+└──────────┘ └──────────┘ └──────────────────┘
+                  ↓              ↓
+             ┌──────────────────────┐
+             │ PostgreSQL :5432     │
+             │ • Orthanc index      │
+             │ • User management    │
+             └──────────────────────┘
+```
+
+### Verification
+
+1. Open `https://localhost/viewer/` — OHIF loads with study list
+2. Click a study — images render in the viewer
+3. JWT-protected endpoints still require tokens: `curl -sk https://localhost/dicom-web/studies` returns 401
+4. All 5 containers healthy: `docker compose ps`
+
+---
+
+## Next Steps (Phase 5)
 
 ### Planned Features
 1. **Next.js Application**
@@ -740,27 +807,22 @@ All tests should pass ✅:
    - JWT authentication integration
    - DICOM proxy API routes
    - Modern React UI with Tailwind CSS
+   - Link to OHIF viewer for study viewing
 
-2. **OHIF/Cornerstone3D Viewer**
-   - Embedded DICOM image viewer
-   - Hanging protocols
-   - Measurement tools
-   - JWT authentication
-
-3. **Production Readiness**
+2. **Production Readiness**
    - Let's Encrypt TLS certificates
    - Firewall rules for DICOM port
    - Audit logging verification
    - Backup procedures
    - Monitoring and alerting
 
-### Prerequisites for Phase 4
+### Prerequisites
 - ✅ Orthanc with DICOMweb
 - ✅ PostgreSQL database
 - ✅ nginx with TLS
 - ✅ JWT-based authorization
+- ✅ OHIF viewer
 - ⏳ Next.js development environment
-- ⏳ OHIF viewer configuration
 
 ---
 
@@ -813,7 +875,7 @@ Before going live with patient data:
 - [ ] Configure firewall for DICOM port 4242
 - [ ] Enable audit logging
 - [ ] Set up automated PostgreSQL backups
-- [ ] Implement JWT-based authorization (Phase 3)
+- [x] Implement JWT-based authorization (Phase 3)
 - [ ] Verify PMK 24/2022 compliance
 - [ ] Load testing with concurrent C-STORE
 - [ ] Disaster recovery testing
@@ -828,9 +890,12 @@ Before going live with patient data:
 - PostgreSQL index for concurrent access
 - DICOMweb standard for interoperability
 
-### ⏳ Pending (Phase 3)
+### ✅ Implemented (Phase 3)
+- Role-based access control (admin, radiologist, viewer)
+- JWT-based authentication with token revocation
+
+### ⏳ Pending
 - Audit logging verification
-- Role-based access control
 - Data retention policies
 - Backup/recovery procedures
 
@@ -871,4 +936,4 @@ Before going live with patient data:
 
 ---
 
-**Session Summary:** Successfully implemented nginx reverse proxy with TLS termination, rate limiting, and security headers. Orthanc is now securely accessible only through HTTPS on port 443, with port 8042 protected from external access. Ready for Phase 3 development (Next.js + OHIF + JWT auth).
+**Session Summary (Phase 4):** Integrated OHIF v3.10.2 DICOM viewer behind nginx at `/viewer/`. OHIF connects to Orthanc via dedicated proxy endpoints (`/ohif-dicom-web/`, `/ohif-wado`) with nginx-injected basic auth, keeping the viewer stateless. Webpack chunk loading handled by nginx catch-all. All 5 services (nginx, orthanc, postgres, auth-service, ohif) running on internal Docker network.
