@@ -68,6 +68,5 @@ env/
 # Claude Code
 .claude/
 
-*.pptx
-*.xlsx
-*.docx
+# Work documentation
+work/
