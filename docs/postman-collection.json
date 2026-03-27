@@ -475,6 +475,137 @@
         }
       ],
       "description": "DICOMweb standard endpoints (QIDO-RS, WADO-RS, STOW-RS)"
+    },
+    {
+      "name": "WADO-URI",
+      "item": [
+        {
+          "name": "Retrieve Instance (JPEG)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{authUrl}}/wado?requestType=WADO&studyUID=:studyUID&seriesUID=:seriesUID&objectUID=:instanceUID&contentType=image/jpeg",
+              "host": ["{{authUrl}}"],
+              "path": ["wado"],
+              "query": [
+                {
+                  "key": "requestType",
+                  "value": "WADO",
+                  "description": "Must be WADO"
+                },
+                {
+                  "key": "studyUID",
+                  "value": ":studyUID",
+                  "description": "Study Instance UID"
+                },
+                {
+                  "key": "seriesUID",
+                  "value": ":seriesUID",
+                  "description": "Series Instance UID"
+                },
+                {
+                  "key": "objectUID",
+                  "value": ":instanceUID",
+                  "description": "SOP Instance UID"
+                },
+                {
+                  "key": "contentType",
+                  "value": "image/jpeg",
+                  "description": "Desired format: application/dicom, image/jpeg, image/png"
+                }
+              ]
+            },
+            "description": "Retrieve a single instance rendered as JPEG via WADO-URI"
+          }
+        },
+        {
+          "name": "Retrieve Instance (DICOM)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{authUrl}}/wado?requestType=WADO&studyUID=:studyUID&seriesUID=:seriesUID&objectUID=:instanceUID",
+              "host": ["{{authUrl}}"],
+              "path": ["wado"],
+              "query": [
+                {
+                  "key": "requestType",
+                  "value": "WADO"
+                },
+                {
+                  "key": "studyUID",
+                  "value": ":studyUID",
+                  "description": "Study Instance UID"
+                },
+                {
+                  "key": "seriesUID",
+                  "value": ":seriesUID",
+                  "description": "Series Instance UID"
+                },
+                {
+                  "key": "objectUID",
+                  "value": ":instanceUID",
+                  "description": "SOP Instance UID"
+                }
+              ]
+            },
+            "description": "Retrieve a single instance as DICOM file via WADO-URI"
+          }
+        }
+      ],
+      "description": "WADO-URI single-image retrieval endpoints (used by OHIF for thumbnails)"
+    },
+    {
+      "name": "OHIF Viewer",
+      "item": [
+        {
+          "name": "Open Study List",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{authUrl}}/viewer/#token={{accessToken}}",
+              "host": ["{{authUrl}}"],
+              "path": ["viewer", ""],
+              "hash": "token={{accessToken}}"
+            },
+            "description": "Open OHIF viewer study list. The JWT token is passed via URL hash fragment — paste this URL in a browser. The token is stored in sessionStorage and removed from the URL automatically."
+          }
+        },
+        {
+          "name": "Open Specific Study (Deep Link)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{authUrl}}/viewer/viewer?StudyInstanceUIDs=:studyUID#token={{accessToken}}",
+              "host": ["{{authUrl}}"],
+              "path": ["viewer", "viewer"],
+              "query": [
+                {
+                  "key": "StudyInstanceUIDs",
+                  "value": ":studyUID",
+                  "description": "Study Instance UID to open directly in the viewer"
+                }
+              ],
+              "hash": "token={{accessToken}}"
+            },
+            "description": "Open OHIF viewer directly for a specific study. Replace :studyUID with the actual Study Instance UID. Paste this URL in a browser."
+          }
+        }
+      ],
+      "description": "OHIF DICOM viewer URLs. These are browser URLs, not API endpoints — open them in a browser, not Postman."
     }
   ]
 }

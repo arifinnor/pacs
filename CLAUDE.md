@@ -10,16 +10,16 @@ A hospital/clinic PACS (Picture Archiving and Communication System) for Indonesi
 - **Orthanc** - DICOM server (receives images from CT/MRI/X-ray modalities)
 - **PostgreSQL** - Production database index (SQLite for local dev only)
 - **Next.js** - Radiologist web UI (planned)
-- **OHIF/Cornerstone3D** - DICOM image viewer (planned)
+- **OHIF** - DICOM image viewer (v3.10.2, served at `/viewer/`)
 - **nginx** - Reverse proxy with TLS termination
 
 **Data flow:**
 ```
 [CT/MRI Modality] → C-STORE (port 4242) → [Orthanc] → [PostgreSQL index]
                                                               ↓
-                                                      [Next.js] ← DICOMweb REST
-                                                              ↓
-                                                        [OHIF Viewer]
+                                                      [nginx] ← DICOMweb REST
+                                                       ↓    ↓
+                                              [OHIF Viewer] [Next.js (planned)]
 ```
 
 ---
@@ -120,6 +120,8 @@ PACS/
 │   ├── jwt-authorization-guide.md # JWT auth guide
 │   ├── api-documentation.md   # Complete API reference
 │   └── postman-collection.json # Postman collection for API testing
+├── ohif/                      # OHIF viewer configuration
+│   └── app-config.js          # Runtime config (DICOMweb endpoints)
 ├── auth-service/              # JWT authentication service
 │   ├── src/                   # TypeScript source
 │   ├── Dockerfile             # Container build
@@ -144,6 +146,7 @@ PACS/
 Located at project root for unified service orchestration.
 - Orthanc service on ports 4242 (DICOM) and 8042 (REST API, internal only)
 - Auth service on port 8000 (JWT validation)
+- OHIF viewer (DICOM image viewer, internal only — accessed through nginx at `/viewer/`)
 - nginx service on ports 80/443 (reverse proxy with TLS)
 - PostgreSQL service with healthcheck
 - Environment variables override orthanc.json settings
@@ -155,6 +158,17 @@ Located at project root for unified service orchestration.
 - `HttpPort`: 8042 for REST API (internal only, never expose publicly)
 - `AuthenticationEnabled`: always `true`
 - `DicomWeb`: QIDO-RS, WADO-RS, STOW-RS endpoints for Next.js integration
+
+### nginx routing
+All external traffic goes through nginx. Key routes:
+- `/auth/` → auth-service (no JWT required)
+- `/orthanc/` → Orthanc REST API (JWT required)
+- `/dicom-web/` → Orthanc DICOMweb (JWT required)
+- `/wado` → Orthanc WADO-URI (JWT required)
+- `/viewer/` → OHIF viewer SPA (no auth — static assets only)
+- `/ohif-dicom-web/` → Orthanc DICOMweb (no JWT — basic auth injected by nginx, used by OHIF)
+- `/ohif-wado` → Orthanc WADO-URI (no JWT — basic auth injected by nginx, used by OHIF)
+- `/` catch-all → OHIF container (serves webpack code-split chunks)
 
 ### .env
 Located at project root.

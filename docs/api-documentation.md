@@ -9,6 +9,8 @@ Complete API reference for the PACS system including JWT authentication and Orth
 | Auth | `https://localhost/auth` |
 | Orthanc REST API | `https://localhost/orthanc` |
 | DICOMweb | `https://localhost/orthanc/dicom-web` or `https://localhost/dicom-web` |
+| WADO-URI | `https://localhost/wado` |
+| OHIF Viewer | `https://localhost/viewer/` |
 
 > **Note:** Ports 8042 (Orthanc) and 8000 (auth-service) are internal only — not exposed to the host. All requests must go through nginx with HTTPS.
 
@@ -19,9 +21,11 @@ Complete API reference for the PACS system including JWT authentication and Orth
 1. [Authentication Service API](#authentication-service-api)
 2. [Orthanc REST API](#orthanc-rest-api)
 3. [DICOMweb API](#dicomweb-api)
-4. [Error Codes](#error-codes)
-5. [Rate Limiting](#rate-limiting)
-6. [Examples](#examples)
+4. [WADO-URI API](#wado-uri-api)
+5. [OHIF Viewer](#ohif-viewer)
+6. [Error Codes](#error-codes)
+7. [Rate Limiting](#rate-limiting)
+8. [Examples](#examples)
 
 ---
 
@@ -924,6 +928,152 @@ Content-Type: application/dicom
 
 ---
 
+## WADO-URI API
+
+### Overview
+
+WADO-URI provides single-image retrieval using a URI-based query format. Used by OHIF for thumbnails and single-frame rendering.
+
+### Base URL
+```
+https://localhost/wado
+```
+
+### Authentication
+
+JWT Bearer Token required (same as DICOMweb).
+
+### Retrieve Instance
+
+```http
+GET /wado?requestType=WADO&studyUID={studyUID}&seriesUID={seriesUID}&objectUID={instanceUID}
+Authorization: Bearer <token>
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| requestType | string | Yes | Must be `WADO` |
+| studyUID | string | Yes | Study Instance UID |
+| seriesUID | string | Yes | Series Instance UID |
+| objectUID | string | Yes | SOP Instance UID |
+| contentType | string | No | Desired format: `application/dicom`, `image/jpeg`, `image/png` |
+| frameNumber | int | No | Frame number (for multi-frame instances) |
+| rows | int | No | Resize height |
+| columns | int | No | Resize width |
+| imageQuality | int | No | JPEG quality (1-100) |
+
+**Example:**
+```http
+GET /wado?requestType=WADO&studyUID=1.2.840.113619.2.5.1762583153.215519.978957063.78&seriesUID=1.2.840.113619.2.5.1762583153.215519.978957063.79&objectUID=1.2.840.113619.2.5.1762583153.215519.978957063.80&contentType=image/jpeg
+Authorization: Bearer <token>
+```
+
+**Response:** `200 OK`
+- Content-Type: as requested (default `application/dicom`)
+- Body: DICOM file or rendered image
+
+---
+
+## OHIF Viewer
+
+### Overview
+
+The OHIF (Open Health Imaging Foundation) viewer is a full-featured radiology workstation served as a web application. It connects to Orthanc via DICOMweb endpoints.
+
+### Base URL
+```
+https://localhost/viewer/
+```
+
+### Authentication
+
+The OHIF viewer itself is a static SPA — no JWT required to load the application. However, all DICOMweb data requests require a JWT token. The token is passed via URL hash fragment.
+
+### Access Patterns
+
+#### 1. Open Study List
+
+Browse all available studies (requires JWT for data loading).
+
+```
+https://localhost/viewer/#token={jwt}
+```
+
+#### 2. Open Specific Study (Deep Link)
+
+Open the viewer directly for a specific study.
+
+```
+https://localhost/viewer/viewer?StudyInstanceUIDs={studyUID}#token={jwt}
+```
+
+**Example:**
+```
+https://localhost/viewer/viewer?StudyInstanceUIDs=1.2.840.113619.2.5.1762583153.215519.978957063.78#token=eyJhbGciOiJIUzI1NiIs...
+```
+
+#### 3. Open Multiple Studies
+
+```
+https://localhost/viewer/viewer?StudyInstanceUIDs={uid1}&StudyInstanceUIDs={uid2}#token={jwt}
+```
+
+### Token Delivery
+
+The JWT token is passed via URL hash fragment (`#token=<jwt>`). This design ensures:
+
+- **Security:** Hash fragments are never sent to the server, so the token does not appear in nginx access logs
+- **Session persistence:** The token is stored in `sessionStorage` and used for all subsequent DICOMweb requests
+- **Auto-cleanup:** The hash is removed from the URL after the token is extracted
+
+### Programmatic Usage
+
+Open OHIF from your application (e.g., a worklist):
+
+```typescript
+function openViewer(studyUID: string, token: string) {
+  const url = `https://localhost/viewer/viewer?StudyInstanceUIDs=${studyUID}#token=${token}`;
+  window.open(url, '_blank');
+}
+```
+
+Or embed via iframe (same-origin only):
+
+```html
+<iframe
+  src="/viewer/viewer?StudyInstanceUIDs={studyUID}#token={jwt}"
+  style="width: 100%; height: 100vh; border: none;"
+  title="DICOM Viewer"
+/>
+```
+
+### DICOMweb Endpoints Used by OHIF
+
+OHIF makes requests to these endpoints (all JWT-protected via nginx):
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /dicom-web/studies` | Study list (QIDO-RS) |
+| `GET /dicom-web/studies/{uid}/series` | Series list for a study |
+| `GET /dicom-web/studies/{uid}/series/{uid}/instances` | Instance list for a series |
+| `GET /dicom-web/studies/{uid}/series/{uid}/instances/{uid}/metadata` | Instance metadata |
+| `GET /dicom-web/studies/{uid}/series/{uid}/instances/{uid}/frames/{n}` | Frame pixel data (WADO-RS) |
+| `GET /wado?requestType=WADO&...` | Thumbnail rendering (WADO-URI) |
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| OHIF loads but study list is empty | No JWT token or token expired | Check URL has `#token=<jwt>`, get a fresh token |
+| 401 errors in browser console | JWT expired mid-session | Refresh the page with a new token in the hash |
+| Images don't render | WADO-RS or WADO-URI failing | Check `/dicom-web/` and `/wado` endpoints return 200 |
+| OHIF shows blank page | Static assets not loading | Check `docker compose ps` shows ohif-viewer running |
+| "No studies found" with valid token | DICOMweb endpoint mismatch | Verify `/dicom-web/studies` returns data with the same token |
+
+---
+
 ## Error Codes
 
 ### HTTP Status Codes
@@ -961,8 +1111,9 @@ Through nginx reverse proxy:
 
 | Zone | Rate | Burst | Applies to |
 |------|------|-------|------------|
-| `api_limit` | 30 req/s | 10 | `/orthanc/*`, `/dicom-web/*` |
+| `api_limit` | 30 req/s | 10 | `/orthanc/*`, `/dicom-web/*`, `/wado` |
 | `auth_limit` | 5 req/s | 3 | `/auth/*` |
+| (none) | — | — | `/viewer/*` (static assets, no rate limit) |
 
 Exceeding limits returns `503 Service Unavailable`.
 
@@ -1018,7 +1169,15 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
   https://localhost/orthanc/instances/$INSTANCE_ID/preview \
   --output preview.png
 
-# 8. Logout
+# 8. Open study in OHIF Viewer
+# Get the StudyInstanceUID from a DICOMweb query
+STUDY_UID=$(curl -sk -H "Authorization: Bearer $TOKEN" \
+  "https://localhost/dicom-web/studies" | jq -r '.[0]["0020000D"].Value[0]')
+
+# Open in OHIF (paste this URL in a browser)
+echo "https://localhost/viewer/viewer?StudyInstanceUIDs=$STUDY_UID#token=$TOKEN"
+
+# 9. Logout
 REFRESH_TOKEN=$(echo $RESPONSE | jq -r '.refresh_token')
 curl -sk -X POST https://localhost/auth/logout \
   -H "Content-Type: application/json" \

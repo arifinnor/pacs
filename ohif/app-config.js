@@ -1,0 +1,35 @@
+window.config = {
+  routerBasename: '/viewer',
+  showStudyList: true,
+  extensions: [],
+  modes: [],
+  customizationService: {},
+  defaultDataSourceName: 'dicomweb',
+  dataSources: [
+    {
+      namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
+      sourceName: 'dicomweb',
+      configuration: {
+        friendlyName: 'Hospital PACS',
+        name: 'orthanc',
+        wadoUriRoot: '/ohif-wado',
+        qidoRoot: '/ohif-dicom-web',
+        wadoRoot: '/ohif-dicom-web',
+        qidoSupportsIncludeField: false,
+        supportsReject: false,
+        imageRendering: 'wadors',
+        thumbnailRendering: 'wadors',
+        enableStudyLazyLoad: true,
+        supportsFuzzyMatching: false,
+        supportsWildcard: true,
+        staticWado: false,
+        singlepart: 'bulkdata,video,pdf',
+      },
+    },
+  ],
+  investigationalUseDialog: {
+    option: 'never',
+  },
+  showLoadingIndicator: true,
+  strictZSpacingForVolumeViewport: true,
+};
