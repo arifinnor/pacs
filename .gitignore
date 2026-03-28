@@ -67,6 +67,3 @@ env/
 
 # Claude Code
 .claude/
-
-# Work documentation
-work/
