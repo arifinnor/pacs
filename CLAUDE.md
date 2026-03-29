@@ -9,9 +9,10 @@ A hospital/clinic PACS (Picture Archiving and Communication System) for Indonesi
 **Tech stack:**
 - **Orthanc** - DICOM server (receives images from CT/MRI/X-ray modalities)
 - **PostgreSQL** - Production database index (SQLite for local dev only)
-- **Next.js** - Radiologist web UI (planned)
+- **Next.js 16** - Radiologist web UI (served at `/app/`)
 - **OHIF** - DICOM image viewer (v3.10.2, served at `/viewer/`)
 - **nginx** - Reverse proxy with TLS termination
+- **Auth service** - Fastify/Node.js JWT authentication service
 
 **Data flow:**
 ```
@@ -19,7 +20,9 @@ A hospital/clinic PACS (Picture Archiving and Communication System) for Indonesi
                                                               ↓
                                                       [nginx] ← DICOMweb REST
                                                        ↓    ↓
-                                              [OHIF Viewer] [Next.js (planned)]
+                                              [OHIF Viewer] [Next.js /app/]
+                                                                  ↓
+                                                     [auth-service JWT cookies]
 ```
 
 ---
@@ -28,17 +31,26 @@ A hospital/clinic PACS (Picture Archiving and Communication System) for Indonesi
 
 ### Local Development
 ```bash
-# From project root
-docker compose up -d
+# From project root (builds and starts all 6 services)
+docker compose up -d --build
 
 # Check services are running
 docker compose ps
 
 # View logs
 docker compose logs -f orthanc
+docker compose logs -f pacs-web
 
 # Stop services
 docker compose down
+```
+
+### Next.js Web App (local dev outside Docker)
+```bash
+cd web
+cp .env.local.example .env.local  # Fill in values pointing at https://localhost
+npm install
+npm run dev  # Starts on http://localhost:3000/app/
 ```
 
 ### Testing & Verification
@@ -129,6 +141,20 @@ PACS/
 │   ├── setup.sh               # Setup script
 │   ├── test.sh                # Test script
 │   └── README.md              # Auth service docs
+├── web/                       # Next.js 16 radiologist dashboard
+│   ├── Dockerfile             # Multi-stage Node 20 Alpine build
+│   ├── next.config.ts         # basePath: '/app', output: 'standalone'
+│   ├── proxy.ts               # Auth proxy (Next.js 16 — replaces middleware.ts)
+│   ├── app/                   # App Router pages and API routes
+│   │   ├── (auth)/login/      # Login page (no sidebar)
+│   │   ├── (dashboard)/       # Authenticated pages (sidebar + header)
+│   │   │   ├── worklist/      # Study list with search/filter
+│   │   │   ├── studies/[uid]/ # Study detail + series list
+│   │   │   └── profile/       # User profile
+│   │   └── api/               # Server-side API routes (proxy to Orthanc/auth)
+│   ├── lib/                   # auth.ts, orthanc.ts, dicom-tags.ts, types.ts
+│   ├── components/            # UI components (sidebar, header, tables, etc.)
+│   └── hooks/                 # use-auth.tsx, use-studies.ts
 └── orthanc/
     ├── orthanc.json           # Orthanc static config (mounted read-only)
     ├── nginx/                 # nginx configuration
@@ -143,14 +169,13 @@ PACS/
 ## Key Configuration Files
 
 ### docker-compose.yml
-Located at project root for unified service orchestration.
-- Orthanc service on ports 4242 (DICOM) and 8042 (REST API, internal only)
-- Auth service on port 8000 (JWT validation)
-- OHIF viewer (DICOM image viewer, internal only — accessed through nginx at `/viewer/`)
-- nginx service on ports 80/443 (reverse proxy with TLS)
-- PostgreSQL service with healthcheck
-- Environment variables override orthanc.json settings
-- Volumes: orthanc-storage (DICOM files), postgres-data (index)
+Located at project root for unified service orchestration. **6 services total:**
+- **web** — Next.js 16 app on port 3000 (internal only, accessed via nginx at `/app/`)
+- **auth-service** — JWT validation on port 8000 (internal only)
+- **orthanc** — DICOM server on ports 4242 (DICOM) and 8042 (REST API, internal only)
+- **ohif** — OHIF viewer (internal only, accessed via nginx at `/viewer/`)
+- **nginx** — Reverse proxy on ports 80/443 (TLS termination)
+- **postgres** — Database on port 5432 (internal only)
 
 ### orthanc.json
 - `DicomAet`: Application Entity Title — must match modality config
@@ -161,6 +186,8 @@ Located at project root for unified service orchestration.
 
 ### nginx routing
 All external traffic goes through nginx. Key routes:
+- `/` → redirect 302 to `/app/`
+- `/app/` → Next.js web app (no JWT — app handles auth via httpOnly cookies)
 - `/auth/` → auth-service (no JWT required)
 - `/orthanc/` → Orthanc REST API (JWT required)
 - `/dicom-web/` → Orthanc DICOMweb (JWT required)
@@ -168,7 +195,14 @@ All external traffic goes through nginx. Key routes:
 - `/viewer/` → OHIF viewer SPA (no auth — static assets only)
 - `/ohif-dicom-web/` → Orthanc DICOMweb (no JWT — basic auth injected by nginx, used by OHIF)
 - `/ohif-wado` → Orthanc WADO-URI (no JWT — basic auth injected by nginx, used by OHIF)
-- `/` catch-all → OHIF container (serves webpack code-split chunks)
+
+### Next.js web app (`web/`)
+- **Auth flow:** Browser → `/app/api/auth/login` → auth-service → httpOnly cookies (no raw JWT in browser)
+- **DICOMweb flow:** Browser → `/app/api/studies` → Orthanc (Basic auth injected server-side)
+- **OHIF link:** `<a href="/viewer/?StudyInstanceUIDs={uid}">` — opens in new tab
+- **proxy.ts** (Next.js 16 rename of `middleware.ts`) — redirects unauthenticated users to `/app/login`
+- All `cookies()` calls are async: `const store = await cookies()`
+- Route params are async: `const { studyUID } = await params`
 
 ### .env
 Located at project root.

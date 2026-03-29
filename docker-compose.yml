@@ -22,6 +22,25 @@ services:
       retries: 3
       start_period: 10s
 
+  web:
+    build: ./web
+    container_name: pacs-web
+    environment:
+      - ORTHANC_INTERNAL_URL=http://orthanc:8042
+      - ORTHANC_USERNAME=admin
+      - ORTHANC_PASSWORD=${ADMIN_PASSWORD}
+      - AUTH_SERVICE_URL=http://auth-service:8000
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - NODE_ENV=production
+    depends_on:
+      orthanc:
+        condition: service_started
+      auth-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - pacs-network
+
   nginx:
     image: nginx:1.27-alpine
     container_name: nginx
@@ -43,6 +62,7 @@ services:
       - orthanc
       - auth-service
       - ohif
+      - web
     restart: unless-stopped
     networks:
       - pacs-network
