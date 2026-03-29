@@ -207,7 +207,14 @@ export async function authRoutes(fastify: FastifyInstance) {
   // nginx auth_request only cares about HTTP status: 200 = allow, 401 = deny
   fastify.get('/validate', async (request, reply) => {
     try {
-      const token = request.headers.authorization?.replace('Bearer ', '');
+      // Accept Bearer token from Authorization header, or access_token cookie
+      // as fallback (used by browser routes like /viewer/ that can't send Bearer)
+      let token = request.headers.authorization?.replace('Bearer ', '').trim();
+      if (!token) {
+        const cookieHeader = request.headers.cookie ?? '';
+        const match = cookieHeader.match(/(?:^|;\s*)access_token=([^;]+)/);
+        token = match?.[1];
+      }
 
       if (!token) {
         return reply.code(401).send({ error: 'No token provided' });
