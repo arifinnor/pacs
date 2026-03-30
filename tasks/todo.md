@@ -20,6 +20,13 @@
 - Pages: login, worklist (search/filter), study detail + series list, profile
 - OHIF links use correct route: `/viewer/viewer?StudyInstanceUIDs=<UID>`
 
+### Phase 7: Token Expiry UX Fix ✅ `a4ab7e2`
+- Root cause: `fetchStudies` and `StatsCards` fetched on mount before `AuthProvider` finished token refresh → 401 errors after idle or on page reload
+- Fix 1: `use-studies.ts` — on 401, calls `/api/auth/refresh` then retries (handles mid-session expiry when user clicks search after idle)
+- Fix 2: `worklist/page.tsx` — `fetchStudies` now guarded by `user` from `useAuth()`, only fires after auth resolves
+- Fix 3: `stats-cards.tsx` — same `user` guard applied, stats fetch waits for authenticated session
+- Pattern: all client data fetches should be gated on `user !== null` from `useAuth()`, not on component mount
+
 ### Phase 6: OHIF Viewer Authentication ✅ `c0ee085`
 - Problem: `/viewer/`, `/ohif-dicom-web/`, `/ohif-wado` were unauthenticated
 - Auth cookie path changed from `/app` to `/` — cookies now sent for all paths
