@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import { Card } from "@/components/ui/card";
 
 interface Stats {
@@ -14,14 +15,16 @@ interface Stats {
 }
 
 export function StatsCards() {
+  const { user } = useAuth();
   const [stats, setStats] = useState<Stats | null>(null);
 
   useEffect(() => {
+    if (!user) return;
     fetch("/app/api/stats")
       .then((r) => (r.ok ? r.json() : null))
       .then(setStats)
       .catch(() => setStats(null));
-  }, []);
+  }, [user]);
 
   if (!stats) {
     return (

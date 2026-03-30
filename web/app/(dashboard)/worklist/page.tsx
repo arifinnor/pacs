@@ -2,17 +2,21 @@
 
 import { useEffect } from "react";
 import { useStudies } from "@/hooks/use-studies";
+import { useAuth } from "@/hooks/use-auth";
 import { StatsCards } from "@/components/stats-cards";
 import { StudyFilters } from "@/components/study-filters";
 import { StudyTable } from "@/components/study-table";
 
 export default function WorklistPage() {
+  const { user } = useAuth();
   const { studies, isLoading, error, fetchStudies, search, reset } =
     useStudies();
 
   useEffect(() => {
-    fetchStudies({});
-  }, [fetchStudies]);
+    if (user) {
+      fetchStudies({});
+    }
+  }, [user, fetchStudies]);
 
   return (
     <div className="flex flex-col gap-6">

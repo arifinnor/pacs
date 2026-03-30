@@ -34,7 +34,13 @@ export function useStudies() {
       params.set("limit", "100");
 
       try {
-        const res = await fetch(`/app/api/studies?${params.toString()}`);
+        let res = await fetch(`/app/api/studies?${params.toString()}`);
+        if (res.status === 401) {
+          const refreshRes = await fetch("/app/api/auth/refresh", { method: "POST" });
+          if (refreshRes.ok) {
+            res = await fetch(`/app/api/studies?${params.toString()}`);
+          }
+        }
         if (!res.ok) {
           throw new Error("Failed to fetch studies");
         }
