@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import config from './config.js';
 import { authRoutes } from './routes/auth.js';
+import { auditRoutes } from './routes/audit.js';
 import { decodeToken } from './auth.js';
 
 declare module 'fastify' {
@@ -52,6 +53,7 @@ async function build() {
 
   // Register routes
   await fastify.register(authRoutes, { prefix: '/auth' });
+  await fastify.register(auditRoutes, { prefix: '/internal' });
 
   // Health check
   fastify.get('/', async (request, reply) => {

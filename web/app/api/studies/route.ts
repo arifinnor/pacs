@@ -2,10 +2,14 @@ import { type NextRequest } from "next/server";
 import { requireAuth, AuthError } from "@/lib/auth";
 import { orthancFetch } from "@/lib/orthanc";
 import { parseStudy } from "@/lib/dicom-tags";
+import { logAudit } from "@/lib/audit";
 
 export async function GET(request: NextRequest) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
+
+  let session;
   try {
-    await requireAuth();
+    session = await requireAuth();
   } catch (e) {
     if (e instanceof AuthError) {
       return Response.json({ error: e.message }, { status: e.status });
@@ -49,5 +53,6 @@ export async function GET(request: NextRequest) {
   const raw = await res.json();
   const studies = Array.isArray(raw) ? raw.map(parseStudy) : [];
 
+  logAudit({ userId: session.username, userRole: session.role, action: "VIEW_STUDIES", resourceType: "STUDY", ipAddress: ip, success: true });
   return Response.json(studies);
 }
