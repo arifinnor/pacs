@@ -1,10 +1,16 @@
 import { cookies } from "next/headers";
-import { clearAuthCookies, getRefreshToken } from "@/lib/auth";
+import { clearAuthCookies, getRefreshToken, getAccessToken, decodeJwtPayload } from "@/lib/auth";
+import { logAudit } from "@/lib/audit";
 
 const AUTH_SERVICE_URL =
   process.env.AUTH_SERVICE_URL || "http://auth-service:8000";
 
-export async function POST() {
+export async function POST(request: Request) {
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+
+  const accessToken = await getAccessToken();
+  const session = accessToken ? decodeJwtPayload(accessToken) : null;
+
   const refreshToken = await getRefreshToken();
 
   if (refreshToken) {
@@ -17,6 +23,8 @@ export async function POST() {
 
   const cookieStore = await cookies();
   await clearAuthCookies(cookieStore);
+
+  logAudit({ userId: session?.username ?? "unknown", userRole: session?.role, action: "LOGOUT", resourceType: "SESSION", ipAddress: ip, success: true });
 
   return Response.json({ success: true });
 }
