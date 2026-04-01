@@ -6,7 +6,7 @@ import { logAudit } from "@/lib/audit";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 
   let session;
   try {

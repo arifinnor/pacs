@@ -5,7 +5,7 @@ import { parseStudy } from "@/lib/dicom-tags";
 import { logAudit } from "@/lib/audit";
 
 export async function GET(request: NextRequest) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 
   let session;
   try {
@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
   const res = await orthancFetch(`/dicom-web/studies?${queryString}`);
 
   if (!res.ok) {
+    logAudit({ userId: session.username, userRole: session.role, action: "VIEW_STUDIES", resourceType: "STUDY", ipAddress: ip, success: false, details: `Orthanc error ${res.status}` });
     return Response.json(
       { error: "Failed to fetch studies" },
       { status: res.status }

@@ -8,7 +8,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ studyUID: string }> }
 ) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 
   let session;
   try {
@@ -27,6 +27,7 @@ export async function GET(
   );
 
   if (!res.ok) {
+    logAudit({ userId: session.username, userRole: session.role, action: "VIEW_STUDY", resourceType: "STUDY", resourceId: studyUID, ipAddress: ip, success: false, details: `Orthanc error ${res.status}` });
     return Response.json(
       { error: "Failed to fetch series" },
       { status: res.status }

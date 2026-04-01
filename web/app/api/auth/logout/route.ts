@@ -6,7 +6,7 @@ const AUTH_SERVICE_URL =
   process.env.AUTH_SERVICE_URL || "http://auth-service:8000";
 
 export async function POST(request: Request) {
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? "unknown";
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
 
   const accessToken = await getAccessToken();
   const session = accessToken ? decodeJwtPayload(accessToken) : null;
