@@ -1,5 +1,5 @@
 services:
-  auth:
+  auth-service:
     build: ./auth-service
     container_name: pacs-auth-service
     # Port 8000 is internal only — accessed through nginx

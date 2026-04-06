@@ -1,83 +1,183 @@
+import { readdirSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { PoolClient } from 'pg';
 import pool from './index.js';
 
-export async function migrate() {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const MIGRATIONS_DIR = join(__dirname, 'migrations');
+
+interface MigrationModule {
+  up: (client: PoolClient) => Promise<void>;
+  down: (client: PoolClient) => Promise<void>;
+}
+
+async function ensureTrackingTable(client: PoolClient): Promise<void> {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id     SERIAL PRIMARY KEY,
+      name   VARCHAR(255) UNIQUE NOT NULL,
+      batch  INTEGER NOT NULL,
+      run_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+}
+
+function getMigrationFiles(): string[] {
+  const allFiles = readdirSync(MIGRATIONS_DIR);
+  return allFiles
+    .filter(f => /^\d{14}_/.test(f) && (f.endsWith('.ts') || f.endsWith('.js')))
+    .filter(f => f !== 'migration.ts' && f !== 'migration.js')
+    .map(f => f.replace(/\.(ts|js)$/, ''))
+    .filter((v, i, a) => a.indexOf(v) === i)
+    .sort();
+}
+
+async function loadMigration(name: string): Promise<MigrationModule> {
+  for (const ext of ['.js', '.ts']) {
+    const filePath = join(MIGRATIONS_DIR, name + ext);
+    try {
+      const mod = await import(filePath);
+      if (typeof mod.up !== 'function' || typeof mod.down !== 'function') {
+        throw new Error(`Migration ${name} must export up() and down() functions`);
+      }
+      return mod as MigrationModule;
+    } catch (err: any) {
+      if (err.code === 'MODULE_NOT_FOUND' || err.code === 'ERR_MODULE_NOT_FOUND') {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`Cannot load migration: ${name}`);
+}
+
+export async function migrate(): Promise<void> {
   const client = await pool.connect();
-
   try {
-    await client.query('BEGIN');
+    await ensureTrackingTable(client);
 
-    // Create users table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        username VARCHAR(255) UNIQUE NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        hashed_password VARCHAR(255) NOT NULL,
-        role VARCHAR(50) NOT NULL DEFAULT 'viewer',
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        last_login TIMESTAMP WITH TIME ZONE
-      );
-    `);
+    const allFiles = getMigrationFiles();
+    const ranResult = await client.query('SELECT name FROM schema_migrations ORDER BY name');
+    const ranNames = new Set(ranResult.rows.map((r: any) => r.name));
+    const pending = allFiles.filter(f => !ranNames.has(f));
 
-    // Create refresh_tokens table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS refresh_tokens (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        token VARCHAR(500) UNIQUE NOT NULL,
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        revoked BOOLEAN DEFAULT false
-      );
-    `);
+    if (pending.length === 0) {
+      console.log('No pending migrations');
+      return;
+    }
 
-    // Create audit_log table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS audit_log (
-        id            BIGSERIAL PRIMARY KEY,
-        timestamp     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        user_id       VARCHAR(255) NOT NULL,
-        user_role     VARCHAR(100),
-        action        VARCHAR(100) NOT NULL,
-        resource_type VARCHAR(100),
-        resource_id   VARCHAR(255),
-        patient_id    VARCHAR(255),
-        ip_address    VARCHAR(45),
-        success       BOOLEAN NOT NULL DEFAULT TRUE,
-        details       TEXT
-      );
-    `);
+    const batchResult = await client.query('SELECT COALESCE(MAX(batch), 0) as max_batch FROM schema_migrations');
+    const nextBatch = batchResult.rows[0].max_batch + 1;
 
-    // Create indexes
-    await client.query('CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_audit_timestamp  ON audit_log (timestamp);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_audit_user_id    ON audit_log (user_id);');
-    await client.query('CREATE INDEX IF NOT EXISTS idx_audit_patient_id ON audit_log (patient_id);');
+    for (const file of pending) {
+      console.log(`Migrating: ${file}`);
+      const migration = await loadMigration(file);
 
-    await client.query('COMMIT');
+      await client.query('BEGIN');
+      try {
+        await migration.up(client);
+        await client.query(
+          'INSERT INTO schema_migrations (name, batch) VALUES ($1, $2)',
+          [file, nextBatch]
+        );
+        await client.query('COMMIT');
+        console.log(`  Done: ${file}`);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`  Failed: ${file}`, err);
+        throw err;
+      }
+    }
 
-    // Prevent app user from deleting audit records (runs outside transaction)
-    await client.query('REVOKE DELETE ON audit_log FROM orthanc;').catch(() => {
-      // Non-fatal: may not apply in all environments
-    });
-    console.log('Migration completed successfully');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('Migration failed', e);
-    throw e;
+    console.log(`Migration batch ${nextBatch} complete (${pending.length} migrations)`);
   } finally {
     client.release();
   }
 }
 
-// Run directly if called as script
+export async function rollback(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensureTrackingTable(client);
+
+    const batchResult = await client.query('SELECT COALESCE(MAX(batch), 0) as max_batch FROM schema_migrations');
+    const currentBatch = batchResult.rows[0].max_batch;
+
+    if (currentBatch === 0) {
+      console.log('Nothing to rollback');
+      return;
+    }
+
+    const result = await client.query(
+      'SELECT name FROM schema_migrations WHERE batch = $1 ORDER BY name DESC',
+      [currentBatch]
+    );
+    const toRollback = result.rows.map((r: any) => r.name);
+
+    for (const file of toRollback) {
+      console.log(`Rolling back: ${file}`);
+      const migration = await loadMigration(file);
+
+      await client.query('BEGIN');
+      try {
+        await migration.down(client);
+        await client.query('DELETE FROM schema_migrations WHERE name = $1', [file]);
+        await client.query('COMMIT');
+        console.log(`  Done: ${file}`);
+      } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`  Failed: ${file}`, err);
+        throw err;
+      }
+    }
+
+    console.log(`Rollback batch ${currentBatch} complete (${toRollback.length} migrations)`);
+  } finally {
+    client.release();
+  }
+}
+
+export async function status(): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await ensureTrackingTable(client);
+
+    const allFiles = getMigrationFiles();
+    const ranRows = await client.query('SELECT name, batch, run_at FROM schema_migrations ORDER BY name');
+    const ranMap = new Map(ranRows.rows.map((r: any) => [r.name, r]));
+
+    for (const file of allFiles) {
+      const ran = ranMap.get(file);
+      if (ran) {
+        console.log(`  [RAN]     ${file}  (batch ${ran.batch}, ${ran.run_at})`);
+      } else {
+        console.log(`  [PENDING] ${file}`);
+      }
+    }
+
+    console.log(`\nTotal: ${allFiles.length} migrations, ${ranRows.rows.length} ran, ${allFiles.length - ranRows.rows.length} pending`);
+  } finally {
+    client.release();
+  }
+}
+
+// CLI entry point
 const isMain = process.argv[1]?.endsWith('migrate.js') || process.argv[1]?.endsWith('migrate.ts');
 if (isMain) {
-  migrate()
+  const command = process.argv[2];
+  const run = async () => {
+    if (command === '--rollback') {
+      await rollback();
+    } else if (command === '--status') {
+      await status();
+    } else {
+      await migrate();
+    }
+  };
+
+  run()
     .then(() => process.exit(0))
     .catch(() => process.exit(1));
 }
