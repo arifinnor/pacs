@@ -40,6 +40,12 @@ services:
     restart: unless-stopped
     networks:
       - pacs-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/app/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   nginx:
     image: nginx:1.27-alpine
@@ -52,17 +58,23 @@ services:
     command: >
       /bin/sh -c "
         export NGINX_ORTHANC_AUTH=$$(printf 'admin:%s' \"$$ADMIN_PASSWORD\" | base64) &&
-        envsubst '$$NGINX_ORTHANC_AUTH' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf &&
+        envsubst '$$NGINX_ORTHANC_AUTH' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf &&
+        mv /tmp/nginx.conf /etc/nginx/nginx.conf &&
+        nginx -t &&
         nginx -g 'daemon off;'
       "
     volumes:
       - ./orthanc/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
       - ./orthanc/nginx/certs:/etc/nginx/certs:ro
     depends_on:
-      - orthanc
-      - auth-service
-      - ohif
-      - web
+      orthanc:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      ohif:
+        condition: service_healthy
+      web:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - pacs-network
@@ -77,6 +89,12 @@ services:
     restart: unless-stopped
     networks:
       - pacs-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   orthanc:
     image: orthancteam/orthanc:26.1.0
@@ -126,6 +144,12 @@ services:
     restart: unless-stopped
     networks:
       - pacs-network
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1', 8042)); s.close()"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   postgres:
     image: postgres:15.8
