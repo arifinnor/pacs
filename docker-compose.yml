@@ -154,6 +154,8 @@ services:
   postgres:
     image: postgres:15.8
     container_name: orthanc-postgres
+    ports:
+      - "5432:5432"
     environment:
       - POSTGRES_DB=orthanc
       - POSTGRES_USER=orthanc
